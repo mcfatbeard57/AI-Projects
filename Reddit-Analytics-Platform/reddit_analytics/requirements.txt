@@ -1,0 +1,11 @@
+streamlit==1.22.0
+requests==2.28.2
+praw==7.7.0
+pandas==1.5.3
+python-dotenv==0.19.2
+supabase==1.0.3
+langchain==0.0.184
+langchain-community
+pydantic==1.10.7
+
+
