@@ -5,11 +5,6 @@
 
 <img width="1624" alt="REP_Themes_News" src="https://github.com/user-attachments/assets/baaf82c5-dedd-4948-a4af-8839d90d0c22">
 
-<img width="1405" alt="REP_collecitons" src="https://github.com/user-attachments/assets/0b9b8663-0a58-4cda-818a-2d9b0ff52522">
-
-<img width="1379" alt="REP_e_collections" src="https://github.com/user-attachments/assets/c72c7c1b-5259-4193-bb03-2cda00496777">
-
-
 
 ## Process to Run the Application
 
