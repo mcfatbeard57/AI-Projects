@@ -1,4 +1,4 @@
-## ALL MY CURSOR PROJECTS
+## ALL MY AI PROJECTS
 
 
 | Project Name | Link | Description |
