@@ -2,27 +2,35 @@
 """
 chatbot_moderation.py
 
-A simple CLI & Streamlit web chatbot with OpenAI moderation and GPT-4.
+A simple CLI & Streamlit web chatbot with moderation and pluggable models (OpenAI or HuggingFace).  
 
 Requirements:
 - Python 3.7+
-- openai package (install with `pip install openai`)
-- streamlit package (install with `pip install streamlit`)
-- Set the environment variable OPENAI_API_KEY with your OpenAI API key.
+- openai (`pip install openai`)
+- streamlit (`pip install streamlit`)
+- transformers (`pip install transformers`)
+- Set environment variables:
+    - `OPENAI_API_KEY` for OpenAI
+    - `MODEL_NAME` for choice of model. E.g.:
+        - `openai:gpt-4` (default)
+        - `openai:gpt-3.5-turbo`
+        - `huggingface:llama-2-7b`
 
 Usage:
   # CLI mode:
-  $ python chatbot_moderation.py
+  $ MODEL_NAME=openai:gpt-4 python chatbot_moderation.py
 
   # Web UI mode:
-  $ streamlit run chatbot_moderation.py
+  $ MODEL_NAME=huggingface:llama-2-7b streamlit run chatbot_moderation.py
 
 This script will:
-1. Prompt the user for input (CLI) or show a web UI (Streamlit).
-2. Check the input with OpenAI's Moderation API.
-3. If the content is flagged, warn and skip the GPT-4 call.
-4. Otherwise, send the conversation history + new user message to GPT-4.
-5. Display the assistant's response and maintain a short history of interactions.
+1. Take user input via CLI or Streamlit.
+2. Run OpenAI's Moderation check.
+3. If flagged, warn (no LLM call).
+4. Otherwise, dispatch to the chosen model backend:
+    - OpenAI API for `openai:` models
+    - HuggingFace Transformers for `huggingface:` models
+5. Display and maintain a short history of interactions.
 """
 import os
 import sys
@@ -35,93 +43,105 @@ try:
 except ImportError:
     st = None
 
-# Load API key from environment
+# Load OpenAI key
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    print("Error: The OPENAI_API_KEY environment variable is not set.")
+    print("Error: Set OPENAI_API_KEY environment variable.")
     sys.exit(1)
 openai.api_key = api_key
 
-# Maximum number of past messages to keep in history
-HISTORY_SIZE = 10
+# Model selection via env
+MODEL_NAME = os.getenv("MODEL_NAME", "openai:gpt-4")
+
+# History size\HISTORY_SIZE = 10
 
 
 def moderate_content(text: str) -> bool:
-    """
-    Returns True if content is safe, False if flagged by moderation.
-    """
     try:
-        response = openai.Moderation.create(input=text)
-        return not response['results'][0]['flagged']
+        result = openai.Moderation.create(input=text)
+        return not result['results'][0]['flagged']
     except Exception as e:
-        print(f"Moderation API error: {e}")
+        print(f"Moderation error: {e}")
         return False
 
 
-def get_gpt4_response(messages: list) -> str:
+def get_response(messages: list) -> str:
     """
-    Sends the message history to GPT-4 and returns the assistant's reply.
+    Dispatch to OpenAI or HuggingFace based on MODEL_NAME.
     """
-    try:
-        resp = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=messages
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Error calling GPT-4 API: {e}"
+    # OpenAI backend
+    if MODEL_NAME.startswith("openai:"):
+        model_id = MODEL_NAME.split(":", 1)[1]
+        try:
+            resp = openai.ChatCompletion.create(
+                model=model_id,
+                messages=messages
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            return f"OpenAI API error: {e}"
+
+    # HuggingFace backend
+    elif MODEL_NAME.startswith("huggingface:"):
+        hf_model = MODEL_NAME.split(":", 1)[1]
+        try:
+            from transformers import pipeline
+            gen = pipeline("text-generation", model=hf_model)
+            # Flatten history into a prompt
+            prompt = "\n".join(f"{msg['role']}: {msg['content']}" for msg in messages)
+            prompt += "\nassistant:"
+            output = gen(prompt, max_length=512, do_sample=True)
+            return output[0]['generated_text']
+        except Exception as e:
+            return f"HuggingFace error: {e}"
+
+    else:
+        return f"Unrecognized MODEL_NAME: {MODEL_NAME}"
 
 
 def run_cli():
     history = deque([], maxlen=HISTORY_SIZE)
-    print("Welcome to the GPT-4 Chatbot with Moderation (CLI). Type 'exit' to quit.")
+    print(f"Chatbot using model {MODEL_NAME}. Type 'exit' to quit.")
     while True:
         user_input = input("You: ")
         if user_input.lower() in ['exit', 'quit']:
-            print("Goodbye!")
             break
 
         if not moderate_content(user_input):
-            print("Warning: Your message was flagged and not sent to the model.")
+            print("Warning: flagged as inappropriate.")
             continue
 
         history.append({"role": "user", "content": user_input})
         messages = [{"role": "system", "content": "You are a helpful assistant."}] + list(history)
-        reply = get_gpt4_response(messages)
+        reply = get_response(messages)
         print(f"Assistant: {reply}\n")
         history.append({"role": "assistant", "content": reply})
 
 
 def run_streamlit():
     if st is None:
-        raise ImportError("Streamlit is not installed. Install with `pip install streamlit`.")
+        raise ImportError("Install streamlit to run web UI.")
 
-    st.set_page_config(page_title="GPT-4 Chatbot with Moderation")
-    st.title("GPT-4 Chatbot with Moderation")
-
+    st.title(f"Chatbot (Model: {MODEL_NAME})")
     if 'history' not in st.session_state:
         st.session_state.history = []
 
-    user_input = st.text_input("You:", key="input")
-    if st.button("Send", key="send") and user_input:
-        if not moderate_content(user_input):
-            st.warning("Your message was flagged as inappropriate.")
+    user = st.text_input("You:", key="input")
+    if st.button("Send") and user:
+        if not moderate_content(user):
+            st.warning("Flagged as inappropriate.")
         else:
-            st.session_state.history.append({"role": "user", "content": user_input})
-            messages = [{"role": "system", "content": "You are a helpful assistant."}] + st.session_state.history
-            reply = get_gpt4_response(messages)
-            st.session_state.history.append({"role": "assistant", "content": reply})
+            st.session_state.history.append({"role": "user", "content": user})
+            msgs = [{"role": "system", "content": "You are a helpful assistant."}] + st.session_state.history
+            resp = get_response(msgs)
+            st.session_state.history.append({"role": "assistant", "content": resp})
 
-    # Display chat history
-    for msg in st.session_state.history:
-        if msg['role'] == "user":
-            st.markdown(f"**You:** {msg['content']}")
-        else:
-            st.markdown(f"**Assistant:** {msg['content']}")
+    for m in st.session_state.history:
+        prefix = "You:" if m['role']=='user' else "Assistant:"
+        st.markdown(f"**{prefix}** {m['content']}")
 
 
 if __name__ == "__main__":
-    # Detect Streamlit environment by its server port var
     if "STREAMLIT_SERVER_PORT" in os.environ:
         run_streamlit()
     else:
